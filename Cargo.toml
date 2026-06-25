@@ -1,0 +1,11 @@
+[package]
+name = "abyss-snaps"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+nix = { version = "0.31.3", features = ["user"] }
+btrfs-uapi = "0.13.0"
+anyhow = "1.0.102"
+

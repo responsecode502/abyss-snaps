@@ -1,0 +1,52 @@
+[
+  {
+    "device": "LABEL=ROOT_PART",
+    "mountpoint": "/",
+    "fstype": "btrfs",
+    "options": ["noatime", "compress=zstd:1", "ssd", "discard=async"],
+    "subvol": "@",
+    "dump": 0,
+    "pass": 0,
+    "type": "DYNAMIC"
+  },
+  {
+    "device": "LABEL=ROOT_PART",
+    "mountpoint": "/mnt/btrfs-root",
+    "fstype": "btrfs",
+    "options": ["noatime", "subvolid=5"],
+    "subvol": null,
+    "dump": 0,
+    "pass": 0,
+    "type": "STATIC"
+  },
+  {
+    "device": "LABEL=ROOT_PART",
+    "mountpoint": "/.snapshots",
+    "fstype": "btrfs",
+    "options": ["noatime", "compress=zstd:1", "ssd", "discard=async"],
+    "subvol": "@snapshots",
+    "dump": 0,
+    "pass": 0,
+    "type": "STATIC"
+  },
+  {
+    "device": "LABEL=ROOT_PART",
+    "mountpoint": "/home",
+    "fstype": "btrfs",
+    "options": ["noatime", "compress=zstd:1", "ssd", "discard=async"],
+    "subvol": "@home",
+    "dump": 0,
+    "pass": 0,
+    "type": "DYNAMIC"
+  },
+  {
+    "device": "tmpfs",
+    "mountpoint": "/tmp",
+    "fstype": "tmpfs",
+    "options": ["defaults", "nosuid", "nodev"],
+    "subvol": null,
+    "dump": 0,
+    "pass": 0,
+    "type": "STATIC"
+  }
+]

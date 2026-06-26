@@ -55,9 +55,9 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
         })
         .collect();
 
-    if let Some((_, collided_name)) = targets
+    if targets
         .iter()
-        .find(|(_, name)| Path::new("/mnt/btrfs-root/@snapshots").join(name).exists())
+        .any(|(_, name)| Path::new("/mnt/btrfs-root/@snapshots").join(name).exists())
     {
         return Err(anyhow!(
             serde_json::to_string(&JsonErrorPayload {
@@ -70,8 +70,8 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
 
     targets
         .iter()
-        .try_for_each(|(src, name_str)| -> Result<()> {
-            let source_dir = File::open(src).with_context(|| {
+        .try_for_each(|(mountpoint, name_str)| -> Result<()> {
+            let source_dir = File::open(mountpoint).with_context(|| {
                 serde_json::to_string(&JsonErrorPayload {
                     error_type: RunnerErrorType::SourceDirOpenFailed,
                     message: "Failed to open target path",
@@ -80,13 +80,13 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
             })?;
 
             let c_name = CString::new(name_str.clone())?;
+            let enforce_ro_on_init = mountpoint != "/";
 
-            // INTENTIONAL: Set read-only argument to false to keep snapshot Read-Write
             btrfs_uapi::subvolume::snapshot_create(
                 parent_dir.as_fd(),
                 source_dir.as_fd(),
                 &c_name,
-                false,
+                enforce_ro_on_init,
                 &[],
             )
             .map_err(|_| {
@@ -101,7 +101,7 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
 
             let log_line = serde_json::to_string(&JsonSuccessPayload {
                 event: RunnerSuccessType::SnapshotCreated,
-                source: src,
+                source: mountpoint,
                 name: name_str,
             })
             .unwrap(); // UNWRAP: Infallible due to static schema string

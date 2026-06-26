@@ -10,4 +10,5 @@ btrfs-uapi = "0.13.0"
 anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+crc32fast = "1.5.0"
 

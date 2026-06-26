@@ -7,7 +7,7 @@
     "subvol": "@",
     "dump": 0,
     "pass": 0,
-    "type": "DYNAMIC"
+    "is_dynamic": true
   },
   {
     "device": "LABEL=ROOT_PART",
@@ -17,7 +17,7 @@
     "subvol": null,
     "dump": 0,
     "pass": 0,
-    "type": "STATIC"
+    "is_dynamic" : false
   },
   {
     "device": "LABEL=ROOT_PART",
@@ -27,7 +27,7 @@
     "subvol": "@snapshots",
     "dump": 0,
     "pass": 0,
-    "type": "STATIC"
+    "is_dynamic": false
   },
   {
     "device": "LABEL=ROOT_PART",
@@ -37,7 +37,7 @@
     "subvol": "@home",
     "dump": 0,
     "pass": 0,
-    "type": "DYNAMIC"
+    "is_dynamic": true
   },
   {
     "device": "tmpfs",
@@ -47,6 +47,6 @@
     "subvol": null,
     "dump": 0,
     "pass": 0,
-    "type": "STATIC"
+    "is_dynamic": false
   }
 ]

@@ -1,19 +1,7 @@
 use crate::config::MountConfig;
-use anyhow::{Context, Result};
-use serde::Serialize;
+use crate::status::StatusCode;
+use anyhow::{Result, anyhow};
 use std::path::Path;
-
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum FstabErrorType {
-    FstabWriteFailed,
-}
-
-#[derive(Serialize)]
-struct JsonErrorPayload {
-    pub error_type: FstabErrorType,
-    pub message: &'static str,
-}
 
 pub fn generate_and_write_fstab(
     config: &[MountConfig],
@@ -45,11 +33,6 @@ pub fn generate_and_write_fstab(
 
     let target_fstab_path = root_snap_path.join("etc/fstab");
 
-    std::fs::write(&target_fstab_path, fstab_content).with_context(|| {
-        serde_json::to_string(&JsonErrorPayload {
-            error_type: FstabErrorType::FstabWriteFailed,
-            message: "Fstab write failed",
-        })
-        .unwrap() // UNWRAP: Infallible due to static schema string
-    })
+    std::fs::write(&target_fstab_path, fstab_content)
+        .map_err(|_| anyhow!(StatusCode::FstabWriteFailed))
 }

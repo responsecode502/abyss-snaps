@@ -1,48 +1,14 @@
 use crate::config::MountConfig;
-use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use crate::status::{self, StatusCode};
+use anyhow::{Result, anyhow};
 use std::ffi::CString;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::Path;
 
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RunnerErrorType {
-    SnapshotsDirOpenFailed,
-    SourceDirOpenFailed,
-    HashCollisionDetected,
-    KernelIoctlFailed,
-    PropertySetFailed,
-}
-
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RunnerSuccessType {
-    SnapshotCreated,
-}
-
-#[derive(Serialize)]
-struct JsonErrorPayload {
-    pub error_type: RunnerErrorType,
-    pub message: &'static str,
-}
-
-#[derive(Serialize)]
-struct JsonSuccessPayload<'a> {
-    pub event: RunnerSuccessType,
-    pub source: &'a str,
-    pub name: &'a str,
-}
-
 pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(String, String)>> {
-    let parent_dir = File::open("/mnt/btrfs-root/@snapshots").with_context(|| {
-        serde_json::to_string(&JsonErrorPayload {
-            error_type: RunnerErrorType::SnapshotsDirOpenFailed,
-            message: "Snapshots storage path missing",
-        })
-        .unwrap() // UNWRAP: Infallible due to static schema string
-    })?;
+    let parent_dir = File::open("/mnt/btrfs-root/@snapshots")
+        .map_err(|_| anyhow!(StatusCode::SnapshotsDirOpenFailed))?;
 
     let targets: Vec<(String, String)> = config
         .iter()
@@ -59,25 +25,14 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
         .iter()
         .any(|(_, name)| Path::new("/mnt/btrfs-root/@snapshots").join(name).exists())
     {
-        return Err(anyhow!(
-            serde_json::to_string(&JsonErrorPayload {
-                error_type: RunnerErrorType::HashCollisionDetected,
-                message: "Snapshot variant already exists",
-            })
-            .unwrap() // UNWRAP: Infallible due to static schema string
-        ));
+        return Err(anyhow!(StatusCode::HashCollisionDetected));
     }
 
     targets
         .iter()
         .try_for_each(|(mountpoint, name_str)| -> Result<()> {
-            let source_dir = File::open(mountpoint).with_context(|| {
-                serde_json::to_string(&JsonErrorPayload {
-                    error_type: RunnerErrorType::SourceDirOpenFailed,
-                    message: "Failed to open target path",
-                })
-                .unwrap() // UNWRAP: Infallible due to static schema string
-            })?;
+            let source_dir =
+                File::open(mountpoint).map_err(|_| anyhow!(StatusCode::SourceDirOpenFailed))?;
 
             let c_name = CString::new(name_str.clone())?;
             let enforce_ro_on_init = mountpoint != "/";
@@ -89,24 +44,9 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
                 enforce_ro_on_init,
                 &[],
             )
-            .map_err(|_| {
-                anyhow!(
-                    serde_json::to_string(&JsonErrorPayload {
-                        error_type: RunnerErrorType::KernelIoctlFailed,
-                        message: "Kernel snapshot creation failed",
-                    })
-                    .unwrap() // UNWRAP: Infallible due to static schema string
-                )
-            })?;
+            .map_err(|_| anyhow!(StatusCode::KernelIoctlFailed))?;
 
-            let log_line = serde_json::to_string(&JsonSuccessPayload {
-                event: RunnerSuccessType::SnapshotCreated,
-                source: mountpoint,
-                name: name_str,
-            })
-            .unwrap(); // UNWRAP: Infallible due to static schema string
-
-            println!("{}", log_line);
+            status::emit_success_snapshot(mountpoint, name_str);
             Ok(())
         })?;
 
@@ -114,23 +54,10 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
 }
 
 pub fn set_read_only(path: &Path, ro: bool) -> Result<()> {
-    let subvol_dir = File::open(path).with_context(|| {
-        serde_json::to_string(&JsonErrorPayload {
-            error_type: RunnerErrorType::PropertySetFailed,
-            message: "Failed to open target to change property",
-        })
-        .unwrap() // UNWRAP: Infallible due to static schema string
-    })?;
+    let subvol_dir = File::open(path).map_err(|_| anyhow!(StatusCode::PropertySetFailed))?;
 
-    let mut flags = get_subvol_flags(subvol_dir.as_raw_fd()).map_err(|_| {
-        anyhow!(
-            serde_json::to_string(&JsonErrorPayload {
-                error_type: RunnerErrorType::PropertySetFailed,
-                message: "Failed to get active flags",
-            })
-            .unwrap() // UNWRAP: Infallible due to static schema string
-        )
-    })?;
+    let mut flags = get_subvol_flags(subvol_dir.as_raw_fd())
+        .map_err(|_| anyhow!(StatusCode::PropertySetFailed))?;
 
     if ro {
         flags |= btrfs_uapi::raw::BTRFS_SUBVOL_RDONLY as u64;
@@ -138,15 +65,8 @@ pub fn set_read_only(path: &Path, ro: bool) -> Result<()> {
         flags &= !(btrfs_uapi::raw::BTRFS_SUBVOL_RDONLY as u64);
     }
 
-    set_subvol_flags(subvol_dir.as_raw_fd(), flags).map_err(|_| {
-        anyhow!(
-            serde_json::to_string(&JsonErrorPayload {
-                error_type: RunnerErrorType::PropertySetFailed,
-                message: "Failed to set active flags",
-            })
-            .unwrap() // UNWRAP: Infallible due to static schema string
-        )
-    })?;
+    set_subvol_flags(subvol_dir.as_raw_fd(), flags)
+        .map_err(|_| anyhow!(StatusCode::PropertySetFailed))?;
 
     Ok(())
 }

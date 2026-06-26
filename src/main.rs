@@ -2,11 +2,12 @@ mod config;
 mod crypto;
 mod fstab;
 mod runner;
+mod status;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use nix::unistd::Uid;
-use serde::Serialize;
+use status::StatusCode;
 use std::fs::OpenOptions;
 use std::path::Path;
 use std::process::ExitCode;
@@ -23,119 +24,55 @@ enum Commands {
     Run,
 }
 
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum MainErrorType {
-    RootRequired,
-    LockFileOpenFailed,
-    ProcessLocked,
-    CryptoGenerationFailed,
-    SnapshotFreezeFailed,
-}
-
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum MainSuccessType {
-    SequenceFinished,
-}
-
-#[derive(Serialize)]
-struct JsonErrorPayload {
-    pub error_type: MainErrorType,
-    pub message: &'static str,
-}
-
-#[derive(Serialize)]
-struct JsonSuccessPayload {
-    pub event: MainSuccessType,
-    pub hash: String,
-    pub message: &'static str,
-}
-
 fn main() -> ExitCode {
-    match run_app() {
-        Ok(()) => ExitCode::from(0),
-        Err(err) => {
-            eprintln!("{err}");
-            ExitCode::from(1)
-        }
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Run => match run_app() {
+            Ok(()) => ExitCode::from(0),
+            Err(err) => {
+                if let Some(status_code) = err.downcast_ref::<StatusCode>() {
+                    status::emit_error(*status_code);
+                } else {
+                    eprintln!("{err}");
+                }
+                ExitCode::from(1)
+            }
+        },
     }
 }
 
 fn run_app() -> Result<()> {
     if !Uid::current().is_root() {
-        return Err(anyhow!(
-            serde_json::to_string(&JsonErrorPayload {
-                error_type: MainErrorType::RootRequired,
-                message: "Root required",
-            })
-            .unwrap() // UNWRAP: Infallible due to static schema string
-        ));
+        return Err(StatusCode::RootRequired.into());
     }
 
-    let cli = Cli::parse();
-    match cli.command {
-        Commands::Run => {
-            let lock_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open("/mnt/btrfs-root/@snapshots/.abyss-snaps.lock")
-                .with_context(|| {
-                    serde_json::to_string(&JsonErrorPayload {
-                        error_type: MainErrorType::LockFileOpenFailed,
-                        message: "Lock initialization failed",
-                    })
-                    .unwrap() // UNWRAP: Infallible due to static schema string
-                })?;
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open("/mnt/btrfs-root/@snapshots/.abyss-snaps.lock")
+        .map_err(|_| StatusCode::LockFileOpenFailed)?;
 
-            let _lock =
-                nix::fcntl::Flock::lock(lock_file, nix::fcntl::FlockArg::LockExclusiveNonblock)
-                    .map_err(|_| {
-                        anyhow!(
-                            serde_json::to_string(&JsonErrorPayload {
-                                error_type: MainErrorType::ProcessLocked,
-                                message: "Instance locked",
-                            })
-                            .unwrap() // UNWRAP: Infallible due to static schema string
-                        )
-                    })?;
+    let _lock = nix::fcntl::Flock::lock(lock_file, nix::fcntl::FlockArg::LockExclusiveNonblock)
+        .map_err(|_| StatusCode::ProcessLocked)?;
 
-            let config = config::load_config("/mnt/btrfs-root/@snapshots/abyss-snaps.json")?;
+    let config = config::load_config("/mnt/btrfs-root/@snapshots/abyss-snaps.json")?;
 
-            let hash_str = crypto::generate_unique_hash().with_context(|| {
-                serde_json::to_string(&JsonErrorPayload {
-                    error_type: MainErrorType::CryptoGenerationFailed,
-                    message: "Hash math failed",
-                })
-                .unwrap() // UNWRAP: Infallible due to static schema string
-            })?;
+    let hash_str = crypto::generate_unique_hash()?;
 
-            let targets = runner::create_snapshots(&config, &hash_str)?;
+    let targets = runner::create_snapshots(&config, &hash_str)?;
 
-            if let Some((_, root_snap_name)) = targets.iter().find(|(mnt, _)| mnt == "/") {
-                let root_snap_path = Path::new("/mnt/btrfs-root/@snapshots").join(root_snap_name);
+    let (_, root_snap_name) = targets
+        .iter()
+        .find(|(mnt, _)| mnt == "/")
+        .ok_or(StatusCode::RootSnapshotNotFound)?; // Cleaner: Uses direct enum fallback token conversion
 
-                fstab::generate_and_write_fstab(&config, &root_snap_path, &hash_str)?;
+    let root_snap_path = Path::new("/mnt/btrfs-root/@snapshots").join(root_snap_name);
 
-                runner::set_read_only(&root_snap_path, true).with_context(|| {
-                    serde_json::to_string(&JsonErrorPayload {
-                        error_type: MainErrorType::SnapshotFreezeFailed,
-                        message: "Tree freeze failed",
-                    })
-                    .unwrap() // UNWRAP: Infallible due to static schema string
-                })?;
-            }
+    fstab::generate_and_write_fstab(&config, &root_snap_path, &hash_str)?;
 
-            let log_line = serde_json::to_string(&JsonSuccessPayload {
-                event: MainSuccessType::SequenceFinished,
-                hash: hash_str,
-                message: "Sequence finished",
-            })
-            .unwrap(); // UNWRAP: Infallible due to static schema string
+    runner::set_read_only(&root_snap_path, true)?;
 
-            println!("{log_line}");
-        }
-    }
+    status::emit_success_finished(&hash_str);
     Ok(())
 }

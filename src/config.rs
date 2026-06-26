@@ -1,5 +1,6 @@
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use crate::status::StatusCode;
+use anyhow::Result;
+use serde::Deserialize;
 
 #[derive(Deserialize, Clone)]
 pub struct MountConfig {
@@ -13,33 +14,9 @@ pub struct MountConfig {
     pub is_dynamic: bool,
 }
 
-#[derive(Serialize, Clone, Copy)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ConfigErrorType {
-    ConfigReadFailed,
-    JsonParseFailed,
-}
-
-#[derive(Serialize)]
-struct JsonErrorPayload {
-    pub error_type: ConfigErrorType,
-    pub message: &'static str,
-}
-
 pub fn load_config(path: &str) -> Result<Vec<MountConfig>> {
-    let config_data = std::fs::read_to_string(path).with_context(|| {
-        serde_json::to_string(&JsonErrorPayload {
-            error_type: ConfigErrorType::ConfigReadFailed,
-            message: "Config read failed",
-        })
-        .unwrap() // UNWRAP: Infallible due to static schema string
-    })?;
+    let config_data = std::fs::read_to_string(path).map_err(|_| StatusCode::ConfigReadFailed)?;
 
-    serde_json::from_str(&config_data).with_context(|| {
-        serde_json::to_string(&JsonErrorPayload {
-            error_type: ConfigErrorType::JsonParseFailed,
-            message: "Wrong json schema",
-        })
-        .unwrap() // UNWRAP: Infallible due to static schema string
-    })
+    // This inline format applies the ? operator and automatically drops Ok(Vec<MountConfig>) down the return line
+    Ok(serde_json::from_str(&config_data).map_err(|_| StatusCode::JsonParseFailed)?)
 }

@@ -40,15 +40,20 @@ struct JsonErrorPayload {
     pub message: &'static str,
 }
 
+// 1. Dedicated, clean payload for inline snapshot creation logs
 #[derive(Serialize)]
-struct JsonSuccessPayload<'a> {
+struct SnapshotCreatedPayload<'a> {
     pub event: SuccessCode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<&'a str>,
+    pub source: &'a str,
+    pub name: &'a str,
+    pub message: &'static str,
+}
+
+// 2. Dedicated, clean payload for final pipeline completion wrap-up
+#[derive(Serialize)]
+struct SequenceFinishedPayload<'a> {
+    pub event: SuccessCode,
+    pub hash: &'a str,
     pub message: &'static str,
 }
 
@@ -78,11 +83,10 @@ pub fn emit_error(code: StatusCode) {
 }
 
 pub fn emit_success_snapshot(source: &str, name: &str) {
-    let line = serde_json::to_string(&JsonSuccessPayload {
+    let line = serde_json::to_string(&SnapshotCreatedPayload {
         event: SuccessCode::SnapshotCreated,
-        hash: None,
-        source: Some(source),
-        name: Some(name),
+        source,
+        name,
         message: "Snapshot created",
     })
     .unwrap(); // UNWRAP: Infallible static structural text schema mapping
@@ -90,11 +94,9 @@ pub fn emit_success_snapshot(source: &str, name: &str) {
 }
 
 pub fn emit_success_finished(hash: &str) {
-    let line = serde_json::to_string(&JsonSuccessPayload {
+    let line = serde_json::to_string(&SequenceFinishedPayload {
         event: SuccessCode::SequenceFinished,
-        hash: Some(hash),
-        source: None,
-        name: None,
+        hash,
         message: "Sequence finished",
     })
     .unwrap(); // UNWRAP: Infallible static structural text schema mapping

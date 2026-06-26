@@ -53,6 +53,31 @@ pub fn create_snapshots(config: &[MountConfig], hash_str: &str) -> Result<Vec<(S
     Ok(targets)
 }
 
+pub fn restore_snapshot(production_name: &str, snapshot_name: &str) -> Result<()> {
+    let root_dir =
+        File::open("/mnt/btrfs-root").map_err(|_| anyhow!(StatusCode::SnapshotsDirOpenFailed))?;
+
+    let source_snap_path = Path::new("/mnt/btrfs-root/@snapshots").join(snapshot_name);
+    let source_snap_dir =
+        File::open(&source_snap_path).map_err(|_| anyhow!(StatusCode::SourceDirOpenFailed))?;
+
+    let c_production = CString::new(production_name)?;
+
+    // INTENTIONAL: Asynchronously purge production tree structure at kernel layer before hot-swapping pointers
+    let _ = btrfs_uapi::subvolume::subvolume_delete(root_dir.as_fd(), &c_production);
+
+    btrfs_uapi::subvolume::snapshot_create(
+        root_dir.as_fd(),
+        source_snap_dir.as_fd(),
+        &c_production,
+        false, // Restored active environments must be writeable to process system runtimes
+        &[],
+    )
+    .map_err(|_| anyhow!(StatusCode::KernelIoctlFailed))?;
+
+    Ok(())
+}
+
 pub fn set_read_only(path: &Path, ro: bool) -> Result<()> {
     let subvol_dir = File::open(path).map_err(|_| anyhow!(StatusCode::PropertySetFailed))?;
 
@@ -73,7 +98,7 @@ pub fn set_read_only(path: &Path, ro: bool) -> Result<()> {
 
 fn get_subvol_flags(fd: std::os::fd::RawFd) -> Result<u64, nix::Error> {
     let mut flags: u64 = 0;
-    // UNSAFE: low-level get subvol flags
+    // UNSAFE: low-level get subvol flags via direct request macro mapping
     unsafe {
         nix::ioctl_read!(btrfs_get_flags, btrfs_uapi::raw::BTRFS_IOCTL_MAGIC, 25, u64);
         btrfs_get_flags(fd, &mut flags)?;
@@ -82,7 +107,7 @@ fn get_subvol_flags(fd: std::os::fd::RawFd) -> Result<u64, nix::Error> {
 }
 
 fn set_subvol_flags(fd: std::os::fd::RawFd, flags: u64) -> Result<(), nix::Error> {
-    // UNSAFE: low-level set subvol flags
+    // UNSAFE: low-level set subvol flags via direct request macro mapping
     unsafe {
         nix::ioctl_write_ptr!(btrfs_set_flags, btrfs_uapi::raw::BTRFS_IOCTL_MAGIC, 26, u64);
         btrfs_set_flags(fd, &flags)?;

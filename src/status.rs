@@ -17,6 +17,7 @@ pub enum StatusCode {
     LockFileOpenFailed,
     ProcessLocked,
     RootSnapshotNotFound,
+    InvalidBootedSubvolume, // Re-added safety token
 }
 
 impl fmt::Display for StatusCode {
@@ -32,6 +33,7 @@ impl std::error::Error for StatusCode {}
 pub enum SuccessCode {
     SnapshotCreated,
     SequenceFinished,
+    RollbackCompleted,
 }
 
 #[derive(Serialize)]
@@ -40,7 +42,6 @@ struct JsonErrorPayload {
     pub message: &'static str,
 }
 
-// 1. Dedicated, clean payload for inline snapshot creation logs
 #[derive(Serialize)]
 struct SnapshotCreatedPayload<'a> {
     pub event: SuccessCode,
@@ -49,9 +50,15 @@ struct SnapshotCreatedPayload<'a> {
     pub message: &'static str,
 }
 
-// 2. Dedicated, clean payload for final pipeline completion wrap-up
 #[derive(Serialize)]
 struct SequenceFinishedPayload<'a> {
+    pub event: SuccessCode,
+    pub hash: &'a str,
+    pub message: &'static str,
+}
+
+#[derive(Serialize)]
+struct RollbackCompletedPayload<'a> {
     pub event: SuccessCode,
     pub hash: &'a str,
     pub message: &'static str,
@@ -72,13 +79,14 @@ pub fn emit_error(code: StatusCode) {
         StatusCode::LockFileOpenFailed => "Lock initialization failed",
         StatusCode::ProcessLocked => "Instance locked",
         StatusCode::RootSnapshotNotFound => "Root snapshot missing in targets",
+        StatusCode::InvalidBootedSubvolume => "Cannot run inside a snapshot sandbox",
     };
 
     let line = serde_json::to_string(&JsonErrorPayload {
         error_type: code,
         message: msg,
     })
-    .unwrap(); // UNWRAP: Infallible static structural text schema mapping
+    .unwrap(); // UNWRAP: Infallible static structural schema mapping
     eprintln!("{line}");
 }
 
@@ -89,7 +97,7 @@ pub fn emit_success_snapshot(source: &str, name: &str) {
         name,
         message: "Snapshot created",
     })
-    .unwrap(); // UNWRAP: Infallible static structural text schema mapping
+    .unwrap(); // UNWRAP: Infallible static structural schema mapping
     println!("{line}");
 }
 
@@ -99,6 +107,16 @@ pub fn emit_success_finished(hash: &str) {
         hash,
         message: "Sequence finished",
     })
-    .unwrap(); // UNWRAP: Infallible static structural text schema mapping
+    .unwrap(); // UNWRAP: Infallible static structural schema mapping
+    println!("{line}");
+}
+
+pub fn emit_success_rollback(hash: &str) {
+    let line = serde_json::to_string(&RollbackCompletedPayload {
+        event: SuccessCode::RollbackCompleted,
+        hash,
+        message: "Rollback finished successfully. Reboot now.",
+    })
+    .unwrap(); // UNWRAP: Infallible static structural schema mapping
     println!("{line}");
 }

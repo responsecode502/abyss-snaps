@@ -14,7 +14,10 @@ pub fn generate_and_write_fstab(
         let mut opts = mount.options.clone();
 
         if let Some(sv) = &mount.subvol {
-            let payload = if mount.is_dynamic {
+            // FIXED: Only the active system root mountpoint "/" links to the unique hash snapshot target path.
+            // Sibling subvolumes (like /home) write their standard production targets ("subvol=@home")
+            // so they map perfectly without string mismatches upon execution rollbacks.
+            let payload = if mount.is_dynamic && mount.mountpoint == "/" {
                 format!("subvol=/@snapshots/{hash_str}.{sv}")
             } else {
                 format!("subvol={sv}")
